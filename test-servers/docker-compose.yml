@@ -1,0 +1,11 @@
+# 5 fake "servers": SSH ports 2201-2205, app ports 3001-3005
+x-node: &node
+  build: .
+  restart: unless-stopped
+
+services:
+  node1: { <<: *node, ports: ["2201:22", "3001:3000"] }
+  node2: { <<: *node, ports: ["2202:22", "3002:3000"] }
+  node3: { <<: *node, ports: ["2203:22", "3003:3000"] }
+  node4: { <<: *node, ports: ["2204:22", "3004:3000"] }
+  node5: { <<: *node, ports: ["2205:22", "3005:3000"] }
