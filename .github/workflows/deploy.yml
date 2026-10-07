@@ -1,0 +1,46 @@
+# CD #1: SINGLE NODE
+# Trigger: har push / merge to main
+# Secrets needed: SSH_PRIVATE_KEY, SSH_USER, SSH_HOST, SSH_PORT
+name: Deploy (single node)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    # Local Docker test servers ke liye: self-hosted (apni machine).
+    # Real VPS (public IP) ho to: ubuntu-latest
+    runs-on: self-hosted
+    env:
+      APP_ENTRY: dist/index.js   # <-- apne build output ke hisab se badlo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: SSH key + known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Upload files (scp)
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "mkdir -p ~/app"
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.SSH_PORT }} -r \
+            dist package.json package-lock.json \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/app/
+
+      - name: Install deps + restart (pm2)
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "cd ~/app && npm ci --omit=dev && (pm2 restart app || pm2 start $APP_ENTRY --name app)"
