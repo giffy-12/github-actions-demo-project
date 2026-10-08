@@ -1,0 +1,64 @@
+# CD #2: MATRIX (multi-node, 5 servers)
+# Build EK baar, deploy 5 nodes pe (artifact se).
+# Secrets needed: SSH_PRIVATE_KEY, SSH_USER
+# (host/port matrix me hain; real servers ho to inhe vars/secrets me le jao)
+name: Deploy (matrix, 5 nodes)
+
+on:
+  workflow_dispatch:      # manual test ke liye
+  # push:                 # single-node deploy.yml band karke ye on karo
+  #   branches: [main]
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-bundle
+          path: |
+            dist
+            package.json
+            package-lock.json
+
+  deploy:
+    needs: build
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false      # ek node fail ho to baqi chalte rahein
+      max-parallel: 2       # rolling: ek waqt me sirf 2 node (sab down na hon)
+      matrix:
+        node:
+          - { name: node1, host: localhost, port: 2201 }
+          - { name: node2, host: localhost, port: 2202 }
+          - { name: node3, host: localhost, port: 2203 }
+          - { name: node4, host: localhost, port: 2204 }
+          - { name: node5, host: localhost, port: 2205 }
+    env:
+      APP_ENTRY: dist/index.js
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-bundle
+
+      - name: SSH key + known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ matrix.node.port }} ${{ matrix.node.host }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to ${{ matrix.node.name }}
+        run: |
+          T="${{ secrets.SSH_USER }}@${{ matrix.node.host }}"
+          ssh -i ~/.ssh/deploy_key -p ${{ matrix.node.port }} $T "mkdir -p ~/app"
+          scp -i ~/.ssh/deploy_key -P ${{ matrix.node.port }} -r \
+            dist package.json package-lock.json $T:~/app/
+          ssh -i ~/.ssh/deploy_key -p ${{ matrix.node.port }} $T \
+            "cd ~/app && npm ci --omit=dev && (pm2 restart app || pm2 start $APP_ENTRY --name app)"
